@@ -175,6 +175,21 @@
           fov: 1.35,
         };
 
+        function cameraFovForView(w, h) {
+          const aspect = w / Math.max(1, h);
+          // taller screens get slightly wider fov to avoid "too tall/thin" look
+          return 1.35 * clamp(1.0 + (0.78 - aspect) * 0.28, 0.86, 1.12);
+        }
+
+        function viewScale(w, h) {
+          // keep consistent framing across aspect ratios
+          const aspect = w / Math.max(1, h);
+          const base = 0.28;
+          // phones are tall -> widen a bit; ultrawide -> tighten a bit
+          const adjust = clamp(1.0 + (0.78 - aspect) * 0.55, 0.78, 1.22);
+          return base * adjust;
+        }
+
         // Tree dimensions in world units
         const tree = {
           height: 2.45,
@@ -500,11 +515,12 @@
         }
         function project(p, w, h) {
           // camera looks at origin-ish, with y centered
+          camera.fov = cameraFovForView(w, h);
           const z = p.z + camera.z;
           const inv = camera.fov / z;
           return {
-            sx: w * 0.5 + p.x * inv * w * 0.28,
-            sy: h * 0.56 - p.y * inv * h * 0.28,
+            sx: w * 0.5 + p.x * inv * w * viewScale(w, h),
+            sy: h * 0.58 - p.y * inv * h * viewScale(w, h),
             s: inv,
             z,
           };
