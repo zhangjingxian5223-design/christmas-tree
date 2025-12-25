@@ -279,7 +279,7 @@
         // -------------- Snow --------------
         const snow = {
           flakes: [],
-          count: 240,
+          count: perfMode === "mobile" ? 150 : 240,
         };
 
         // -------------- Particle Tree (point cloud) --------------
@@ -1434,9 +1434,10 @@
           const dpr = DPR();
           ctx.save();
           ctx.globalCompositeOperation = "source-over";
+          const speedMul = perfMode === "mobile" ? 0.72 : 1.0;
           for (const f of snow.flakes) {
-            f.y += f.vy * (0.007 + 0.010 * (1 - f.z));
-            f.x += f.vx * (0.35 + 0.8 * (1 - f.z)) + Math.sin(t * 0.6 + f.w) * 0.0006;
+            f.y += speedMul * f.vy * (0.0055 + 0.0075 * (1 - f.z));
+            f.x += speedMul * (f.vx * (0.30 + 0.65 * (1 - f.z)) + Math.sin(t * 0.55 + f.w) * 0.00045);
             if (f.y > 1.05) {
               f.y = -0.05;
               f.x = Math.random();
