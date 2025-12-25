@@ -1,0 +1,1155 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+    <meta name="color-scheme" content="dark" />
+    <title>Merry Christmas</title>
+    <style>
+      :root {
+        --bg0: #04050a;
+        --bg1: #04020a;
+        --txt: rgba(255, 255, 255, 0.92);
+        --muted: rgba(255, 255, 255, 0.68);
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: radial-gradient(1200px 900px at 50% 0%, #2a0c16 0%, #12050b 55%, #06030a 100%);
+        overflow: hidden;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji",
+          "Segoe UI Emoji";
+      }
+      canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        touch-action: manipulation;
+      }
+      .ui {
+        position: fixed;
+        inset: 0;
+        pointer-events: none;
+      }
+      .card {
+        position: absolute;
+        left: 50%;
+        bottom: max(18px, env(safe-area-inset-bottom));
+        transform: translateX(-50%);
+        padding: 10px 14px;
+        border-radius: 16px;
+        background: rgba(0, 0, 0, 0.25);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        backdrop-filter: blur(10px);
+        -webkit-backdrop-filter: blur(10px);
+        color: var(--txt);
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        pointer-events: auto;
+      }
+      .btn {
+        pointer-events: auto;
+        border: 0;
+        border-radius: 999px;
+        padding: 10px 12px;
+        background: rgba(255, 255, 255, 0.12);
+        color: var(--txt);
+        font-weight: 600;
+        letter-spacing: 0.2px;
+      }
+      .btn:active {
+        transform: translateY(1px);
+      }
+      .hint {
+        font-size: 13px;
+        color: var(--muted);
+        user-select: none;
+      }
+      .script {
+        position: absolute;
+        top: max(26px, env(safe-area-inset-top));
+        left: 50%;
+        transform: translateX(-50%);
+        color: rgba(255, 255, 255, 0.95);
+        font-size: clamp(34px, 6vw, 62px);
+        line-height: 1;
+        letter-spacing: 0.5px;
+        text-shadow: 0 0 18px rgba(255, 255, 255, 0.18), 0 0 48px rgba(120, 190, 255, 0.12);
+        user-select: none;
+        pointer-events: none;
+        font-family: "Snell Roundhand", "Apple Chancery", "Zapfino", "Segoe Script", "Brush Script MT", cursive;
+        opacity: 0.95;
+        filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.35));
+        white-space: nowrap;
+      }
+      .sub {
+        position: absolute;
+        top: calc(max(26px, env(safe-area-inset-top)) + clamp(34px, 6vw, 62px) + 10px);
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 13px;
+        color: rgba(255, 255, 255, 0.7);
+        user-select: none;
+        pointer-events: none;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="c"></canvas>
+    <div class="ui" aria-hidden="true">
+      <div class="script">Merry Christmas</div>
+      <div class="sub">Tap to play music · Drag to rotate</div>
+      <div class="card">
+        <button id="music" class="btn">Play Music</button>
+        <div id="status" class="hint">Lights twinkle · Snow falling</div>
+      </div>
+    </div>
+
+    <script>
+      (() => {
+        "use strict";
+
+        const canvas = document.getElementById("c");
+        const ctx = canvas.getContext("2d", { alpha: false });
+        const musicBtn = document.getElementById("music");
+        const statusEl = document.getElementById("status");
+
+        const DPR = () => Math.min(2, window.devicePixelRatio || 1);
+        function resize() {
+          const dpr = DPR();
+          const w = Math.max(1, Math.floor(window.innerWidth * dpr));
+          const h = Math.max(1, Math.floor(window.innerHeight * dpr));
+          if (canvas.width !== w || canvas.height !== h) {
+            canvas.width = w;
+            canvas.height = h;
+          }
+        }
+        window.addEventListener("resize", resize, { passive: true });
+        resize();
+
+        // -------------- Math helpers --------------
+        const TAU = Math.PI * 2;
+        const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+        const lerp = (a, b, t) => a + (b - a) * t;
+        const smoothstep = (e0, e1, x) => {
+          const t = clamp((x - e0) / (e1 - e0), 0, 1);
+          return t * t * (3 - 2 * t);
+        };
+
+        function hsvToRgb(h, s, v) {
+          h = ((h % 1) + 1) % 1;
+          const i = Math.floor(h * 6);
+          const f = h * 6 - i;
+          const p = v * (1 - s);
+          const q = v * (1 - f * s);
+          const t = v * (1 - (1 - f) * s);
+          const m = i % 6;
+          const r = [v, q, p, p, t, v][m];
+          const g = [t, v, v, q, p, p][m];
+          const b = [p, p, t, v, v, q][m];
+          return [r, g, b];
+        }
+
+        // -------------- Scene params --------------
+        const scene = {
+          rotY: 0,
+          rotX: -0.12,
+          targetRotY: 0,
+          targetRotX: -0.12,
+          dragging: false,
+          lastX: 0,
+          lastY: 0,
+          autoSpin: 0.08,
+        };
+
+        const camera = {
+          // simple perspective
+          z: 3.2,
+          fov: 1.35,
+        };
+
+        // Tree dimensions in world units
+        const tree = {
+          height: 2.45,
+          baseRadius: 1.15,
+          layers: 85,
+        };
+
+        const trunk = {
+          height: 0.78,
+          radius: 0.14,
+        };
+
+        // -------------- Texture helpers --------------
+        function hash2(x, y) {
+          const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453123;
+          return s - Math.floor(s);
+        }
+        function valueNoise2(x, y) {
+          const xi = Math.floor(x);
+          const yi = Math.floor(y);
+          const xf = x - xi;
+          const yf = y - yi;
+          const u = xf * xf * (3 - 2 * xf);
+          const v = yf * yf * (3 - 2 * yf);
+          const n00 = hash2(xi, yi);
+          const n10 = hash2(xi + 1, yi);
+          const n01 = hash2(xi, yi + 1);
+          const n11 = hash2(xi + 1, yi + 1);
+          return lerp(lerp(n00, n10, u), lerp(n01, n11, u), v);
+        }
+        function fbm2(x, y) {
+          let f = 0;
+          let amp = 0.55;
+          let freq = 1;
+          for (let i = 0; i < 4; i++) {
+            f += amp * valueNoise2(x * freq, y * freq);
+            freq *= 2.02;
+            amp *= 0.55;
+          }
+          return f;
+        }
+
+        // -------------- Input: drag rotate, tap toggle sparkle --------------
+        function pointerDown(x, y) {
+          scene.dragging = true;
+          scene.lastX = x;
+          scene.lastY = y;
+        }
+        function pointerMove(x, y) {
+          if (!scene.dragging) return;
+          const dx = x - scene.lastX;
+          const dy = y - scene.lastY;
+          scene.lastX = x;
+          scene.lastY = y;
+          scene.targetRotY += dx * 0.006;
+          scene.targetRotX += dy * 0.004;
+          scene.targetRotX = clamp(scene.targetRotX, -0.6, 0.25);
+        }
+        function pointerUp() {
+          scene.dragging = false;
+        }
+
+        canvas.addEventListener(
+          "pointerdown",
+          (e) => {
+            canvas.setPointerCapture(e.pointerId);
+            pointerDown(e.clientX, e.clientY);
+          },
+          { passive: true },
+        );
+        canvas.addEventListener(
+          "pointermove",
+          (e) => pointerMove(e.clientX, e.clientY),
+          { passive: true },
+        );
+        canvas.addEventListener(
+          "pointerup",
+          () => pointerUp(),
+          { passive: true },
+        );
+        canvas.addEventListener(
+          "pointercancel",
+          () => pointerUp(),
+          { passive: true },
+        );
+
+        // -------------- Snow --------------
+        const snow = {
+          flakes: [],
+          count: 240,
+        };
+
+        function initSnow() {
+          snow.flakes.length = 0;
+          for (let i = 0; i < snow.count; i++) {
+            snow.flakes.push({
+              x: Math.random(),
+              y: Math.random(),
+              z: Math.random(),
+              vx: (Math.random() - 0.5) * 0.02,
+              vy: 0.12 + Math.random() * 0.24,
+              r: 0.6 + Math.random() * 1.8,
+              w: Math.random() * TAU,
+            });
+          }
+        }
+        initSnow();
+
+        // -------------- Lights (ornaments) --------------
+        const lights = {
+          bulbs: [],
+          count: 150,
+        };
+
+        function treeRadiusAtY(y) {
+          // y in [0, height]
+          const t = y / tree.height;
+          const profile = Math.pow(1 - t, 1.05);
+          // keep the silhouette cleaner/symmetric
+          const scallop = 0.04 * Math.sin(t * 8.0 * TAU) + 0.02 * Math.sin(t * 3.0 * TAU);
+          return tree.baseRadius * (profile + scallop);
+        }
+
+        function initLights() {
+          lights.bulbs.length = 0;
+          for (let i = 0; i < lights.count; i++) {
+            const y = Math.random() * tree.height;
+            const r = treeRadiusAtY(y) * (0.82 + Math.random() * 0.24);
+            const a = Math.random() * TAU;
+            const x = Math.cos(a) * r;
+            const z = Math.sin(a) * r;
+            const hue = Math.random();
+            lights.bulbs.push({
+              x,
+              y,
+              z,
+              hue,
+              phase: Math.random() * TAU,
+              tw: 0.6 + Math.random() * 0.8,
+              size: 1.4 + Math.random() * 1.8,
+            });
+          }
+        }
+        initLights();
+
+        // -------------- Star --------------
+        const star = {
+          x: 0,
+          y: tree.height + 0.12,
+          z: 0,
+        };
+
+        // -------------- 3D to 2D projection --------------
+        function rotateY(p, a) {
+          const s = Math.sin(a);
+          const c = Math.cos(a);
+          return {
+            x: p.x * c + p.z * s,
+            y: p.y,
+            z: -p.x * s + p.z * c,
+          };
+        }
+        function rotateX(p, a) {
+          const s = Math.sin(a);
+          const c = Math.cos(a);
+          return {
+            x: p.x,
+            y: p.y * c - p.z * s,
+            z: p.y * s + p.z * c,
+          };
+        }
+        function project(p, w, h) {
+          // camera looks at origin-ish, with y centered
+          const z = p.z + camera.z;
+          const inv = camera.fov / z;
+          return {
+            sx: w * 0.5 + p.x * inv * w * 0.28,
+            sy: h * 0.56 - p.y * inv * h * 0.28,
+            s: inv,
+            z,
+          };
+        }
+
+        // -------------- Audio: WebAudio "Jingle Bells" synth --------------
+        const audio = {
+          ctx: null,
+          gain: null,
+          playing: false,
+          startedAt: 0,
+          nextNoteAt: 0,
+          idx: 0,
+          bpm: 120,
+          seq: [],
+          unlocked: false,
+          voice: null,
+        };
+
+        function midiToFreq(m) {
+          return 440 * Math.pow(2, (m - 69) / 12);
+        }
+
+        function buildJingleBellsSeq() {
+          // (midi note, beats). 0 = rest
+          // A simple recognizable motif, loopable.
+          const E5 = 76,
+            D5 = 74,
+            C5 = 72,
+            G5 = 79,
+            F5 = 77,
+            A4 = 69,
+            B4 = 71,
+            A5 = 81;
+          return [
+            [E5, 1],
+            [E5, 1],
+            [E5, 2],
+            [E5, 1],
+            [E5, 1],
+            [E5, 2],
+            [E5, 1],
+            [G5, 1],
+            [C5, 1.5],
+            [D5, 0.5],
+            [E5, 3],
+            [0, 0.5],
+            [F5, 1],
+            [F5, 1],
+            [F5, 1.5],
+            [F5, 0.5],
+            [F5, 1],
+            [E5, 1],
+            [E5, 1],
+            [E5, 0.5],
+            [E5, 0.5],
+            [E5, 1],
+            [D5, 1],
+            [D5, 1],
+            [E5, 1],
+            [D5, 2],
+            [G5, 2],
+            [0, 1],
+            [E5, 1],
+            [E5, 1],
+            [E5, 2],
+            [E5, 1],
+            [E5, 1],
+            [E5, 2],
+            [E5, 1],
+            [G5, 1],
+            [C5, 1.5],
+            [D5, 0.5],
+            [E5, 3],
+            [0, 0.5],
+            [F5, 1],
+            [F5, 1],
+            [F5, 1.5],
+            [F5, 0.5],
+            [F5, 1],
+            [E5, 1],
+            [E5, 1],
+            [G5, 1],
+            [G5, 1],
+            [F5, 1],
+            [D5, 1],
+            [C5, 3],
+            [0, 1],
+            // quick tag
+            [A4, 1],
+            [B4, 1],
+            [C5, 1],
+            [D5, 1],
+            [E5, 2],
+            [A5, 2],
+            [G5, 2],
+            [0, 2],
+          ];
+        }
+
+        function ensureAudio() {
+          if (audio.ctx) return;
+          const AC = window.AudioContext || window.webkitAudioContext;
+          if (!AC) {
+            statusEl.textContent = "(Audio not supported)";
+            return;
+          }
+          const ctxA = new AC();
+          const gain = ctxA.createGain();
+          const comp = ctxA.createDynamicsCompressor();
+          const filter = ctxA.createBiquadFilter();
+          filter.type = "lowpass";
+          filter.frequency.value = 5200;
+          filter.Q.value = 0.5;
+
+          gain.gain.value = 0.0;
+          filter.connect(comp);
+          comp.connect(gain);
+          gain.connect(ctxA.destination);
+
+          audio.ctx = ctxA;
+          audio.gain = gain;
+          audio.filter = filter;
+          audio.seq = buildJingleBellsSeq();
+        }
+
+        function makeVoice(freq, when, dur) {
+          const ctxA = audio.ctx;
+          const o1 = ctxA.createOscillator();
+          const o2 = ctxA.createOscillator();
+          const n = ctxA.createGain();
+          const v = ctxA.createGain();
+
+          o1.type = "triangle";
+          o2.type = "sine";
+          o1.frequency.setValueAtTime(freq, when);
+          o2.frequency.setValueAtTime(freq * 2, when);
+
+          // slight vibrato
+          const lfo = ctxA.createOscillator();
+          const lfoGain = ctxA.createGain();
+          lfo.type = "sine";
+          lfo.frequency.setValueAtTime(5.2, when);
+          lfoGain.gain.setValueAtTime(6.0, when);
+          lfo.connect(lfoGain);
+          lfoGain.connect(o1.frequency);
+
+          // envelope
+          const a = 0.01;
+          const d = Math.min(0.12, dur * 0.35);
+          const s = 0.28;
+          const r = 0.06;
+
+          v.gain.setValueAtTime(0.0001, when);
+          v.gain.exponentialRampToValueAtTime(1.0, when + a);
+          v.gain.exponentialRampToValueAtTime(Math.max(0.0001, s), when + a + d);
+          v.gain.setValueAtTime(Math.max(0.0001, s), when + dur);
+          v.gain.exponentialRampToValueAtTime(0.0001, when + dur + r);
+
+          // shimmer
+          n.gain.setValueAtTime(0.08, when);
+          n.gain.exponentialRampToValueAtTime(0.02, when + dur);
+          const noise = ctxA.createBufferSource();
+          const buf = ctxA.createBuffer(1, Math.floor(ctxA.sampleRate * (dur + r + 0.1)), ctxA.sampleRate);
+          const data = buf.getChannelData(0);
+          for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctxA.sampleRate * 0.05));
+          noise.buffer = buf;
+
+          const mix = ctxA.createGain();
+          mix.gain.value = 0.22;
+
+          o1.connect(v);
+          o2.connect(v);
+          noise.connect(n);
+          v.connect(mix);
+          n.connect(mix);
+          mix.connect(audio.filter);
+
+          o1.start(when);
+          o2.start(when);
+          lfo.start(when);
+          noise.start(when);
+
+          o1.stop(when + dur + r + 0.05);
+          o2.stop(when + dur + r + 0.05);
+          lfo.stop(when + dur + r + 0.05);
+          noise.stop(when + dur + r + 0.05);
+        }
+
+        function scheduleAudio(now) {
+          if (!audio.playing || !audio.ctx) return;
+          const beat = 60 / audio.bpm;
+          const lookAhead = 0.25;
+
+          while (audio.nextNoteAt < now + lookAhead) {
+            const [note, beats] = audio.seq[audio.idx];
+            const dur = beats * beat;
+            if (note !== 0) {
+              makeVoice(midiToFreq(note), audio.nextNoteAt, Math.max(0.04, dur * 0.9));
+            }
+            audio.nextNoteAt += dur;
+            audio.idx = (audio.idx + 1) % audio.seq.length;
+          }
+        }
+
+        function setMusicUI() {
+          musicBtn.textContent = audio.playing ? "Pause" : "Play Music";
+          statusEl.textContent = audio.playing
+            ? "Music on · Lights twinkle · Snow falling"
+            : "Tap Play Music · Lights twinkle · Snow falling";
+        }
+
+        async function toggleMusic() {
+          ensureAudio();
+          if (!audio.ctx) return;
+
+          if (audio.ctx.state === "suspended") {
+            try {
+              await audio.ctx.resume();
+            } catch {
+              // ignore
+            }
+          }
+
+          const now = audio.ctx.currentTime;
+          if (!audio.playing) {
+            audio.playing = true;
+            audio.startedAt = now;
+            audio.nextNoteAt = now + 0.03;
+            audio.idx = 0;
+            audio.gain.gain.cancelScheduledValues(now);
+            audio.gain.gain.setValueAtTime(audio.gain.gain.value, now);
+            audio.gain.gain.linearRampToValueAtTime(0.22, now + 0.15);
+          } else {
+            audio.playing = false;
+            audio.gain.gain.cancelScheduledValues(now);
+            audio.gain.gain.setValueAtTime(audio.gain.gain.value, now);
+            audio.gain.gain.linearRampToValueAtTime(0.0, now + 0.12);
+          }
+          setMusicUI();
+        }
+
+        musicBtn.addEventListener("click", (e) => {
+          e.preventDefault();
+          toggleMusic();
+        });
+
+        // Enable tap anywhere to play music (WeChat gesture constraints)
+        window.addEventListener(
+          "pointerdown",
+          (e) => {
+            if (audio.playing || e.target === musicBtn) return;
+            // do not auto-start: only if user taps the button area? We keep it explicit.
+          },
+          { passive: true },
+        );
+
+        setMusicUI();
+
+        // -------------- Rendering --------------
+        function drawBackground(w, h, t) {
+          // subtle moving aurora glow
+          ctx.fillStyle = "#02030a";
+          ctx.fillRect(0, 0, w, h);
+
+          const gx = w * 0.5;
+          const gy = h * 0.20;
+          const r0 = Math.min(w, h) * 0.12;
+          const r1 = Math.min(w, h) * 0.75;
+          const g = ctx.createRadialGradient(gx, gy, r0, gx, gy, r1);
+          const p = 0.5 + 0.5 * Math.sin(t * 0.18);
+          g.addColorStop(0.0, `rgba(${Math.floor(210 + 35 * p)}, ${Math.floor(40 + 30 * p)}, ${Math.floor(80 + 40 * p)}, 0.24)`);
+          g.addColorStop(0.38, `rgba(${Math.floor(70 + 40 * p)}, ${Math.floor(20 + 20 * p)}, ${Math.floor(45 + 25 * p)}, 0.20)`);
+          g.addColorStop(1.0, "rgba(0,0,0,0)");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, 0, w, h);
+
+          // faint stars
+          ctx.save();
+          ctx.globalAlpha = 0.24;
+          ctx.fillStyle = "#cfe8ff";
+          const n = 90;
+          for (let i = 0; i < n; i++) {
+            const x = (Math.sin(i * 999 + 1.23) * 0.5 + 0.5) * w;
+            const y = (Math.sin(i * 1337 + 4.56) * 0.5 + 0.5) * h * 0.55;
+            const tw = 0.5 + 0.5 * Math.sin(t * 0.8 + i);
+            const rr = (0.6 + 1.2 * tw) * DPR();
+            ctx.beginPath();
+            ctx.arc(x, y, rr, 0, TAU);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        function drawGround(w, h, t) {
+          // soft snowy ground glow
+          const y = h * 0.78;
+          const g = ctx.createLinearGradient(0, y, 0, h);
+          g.addColorStop(0, "rgba(255, 235, 245, 0.00)");
+          g.addColorStop(0.25, "rgba(255, 235, 245, 0.06)");
+          g.addColorStop(1, "rgba(255, 235, 245, 0.11)");
+          ctx.fillStyle = g;
+          ctx.fillRect(0, y, w, h - y);
+
+          // subtle snow hills
+          ctx.save();
+          ctx.globalAlpha = 0.14;
+          ctx.fillStyle = "#ffeaf2";
+          ctx.beginPath();
+          ctx.moveTo(0, h);
+          ctx.quadraticCurveTo(w * 0.25, h * 0.73 + Math.sin(t * 0.25) * h * 0.01, w * 0.5, h * 0.81);
+          ctx.quadraticCurveTo(w * 0.75, h * 0.9 + Math.cos(t * 0.22) * h * 0.01, w, h * 0.77);
+          ctx.lineTo(w, h);
+          ctx.closePath();
+          ctx.fill();
+          ctx.restore();
+        }
+
+        function drawTree(w, h, t) {
+          // Smooth camera & rotation
+          if (!scene.dragging) scene.targetRotY += scene.autoSpin * 0.012;
+          scene.rotY = lerp(scene.rotY, scene.targetRotY, 0.08);
+          scene.rotX = lerp(scene.rotX, scene.targetRotX, 0.08);
+
+          const dpr = DPR();
+          const glowScale = Math.min(w, h) / (900 * dpr);
+
+          // ground shadow under the tree
+          {
+            const base = rotateX(rotateY({ x: 0, y: 0.05, z: 0 }, scene.rotY), scene.rotX);
+            const pr = project(base, w, h);
+            ctx.save();
+            ctx.globalAlpha = 0.35;
+            const rr = Math.min(w, h) * 0.13 * (0.85 + pr.s);
+            const g = ctx.createRadialGradient(pr.sx, pr.sy + rr * 1.65, rr * 0.2, pr.sx, pr.sy + rr * 1.65, rr * 1.9);
+            g.addColorStop(0, "rgba(0,0,0,0.42)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.ellipse(pr.sx, pr.sy + rr * 1.65, rr * 1.35, rr * 0.55, 0, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // trunk
+          {
+            // center trunk a bit lower, and scale with perspective
+            const base = rotateX(rotateY({ x: 0, y: 0.12, z: 0 }, scene.rotY), scene.rotX);
+            const p = project(base, w, h);
+            ctx.save();
+            const wWorld = trunk.radius * 2;
+            const hWorld = trunk.height;
+            const trunkW = Math.max(18 * dpr, wWorld * (camera.fov / p.z) * w * 0.28);
+            const trunkH = Math.max(56 * dpr, hWorld * (camera.fov / p.z) * h * 0.28);
+            const trunkX = p.sx - trunkW * 0.5;
+            const trunkY = p.sy + 78 * dpr * p.s;
+            // bark gradient
+            const g = ctx.createLinearGradient(trunkX, 0, trunkX + trunkW, 0);
+            g.addColorStop(0.0, "rgba(35, 18, 12, 0.96)");
+            g.addColorStop(0.18, "rgba(78, 44, 26, 0.98)");
+            g.addColorStop(0.55, "rgba(60, 32, 20, 0.98)");
+            g.addColorStop(1.0, "rgba(24, 12, 10, 0.96)");
+            ctx.fillStyle = g;
+            ctx.globalAlpha = 0.95;
+            ctx.beginPath();
+            ctx.roundRect(trunkX, trunkY, trunkW, trunkH, 14 * dpr * p.s);
+            ctx.fill();
+
+            // bark streaks
+            ctx.globalAlpha = 0.20;
+            ctx.strokeStyle = "rgba(255,255,255,0.35)";
+            ctx.lineWidth = 1.2 * dpr * p.s;
+            for (let i = 0; i < 8; i++) {
+              const x = trunkX + (i / 8) * trunkW + (hash2(i, 9) - 0.5) * trunkW * 0.08;
+              ctx.beginPath();
+              ctx.moveTo(x, trunkY + trunkH * 0.08);
+              ctx.bezierCurveTo(
+                x + trunkW * 0.06,
+                trunkY + trunkH * 0.32,
+                x - trunkW * 0.04,
+                trunkY + trunkH * 0.62,
+                x + trunkW * 0.05,
+                trunkY + trunkH * 0.92,
+              );
+              ctx.stroke();
+            }
+
+            // trunk glow separation from foliage
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = 0.08;
+            const gg = ctx.createRadialGradient(p.sx, trunkY, 0, p.sx, trunkY, trunkW * 1.8);
+            gg.addColorStop(0, "rgba(255,210,120,0.38)");
+            gg.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = gg;
+            ctx.beginPath();
+            ctx.arc(p.sx, trunkY, trunkW * 1.8, 0, TAU);
+            ctx.fill();
+
+            // snow at trunk base
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 0.25;
+            ctx.fillStyle = "rgba(255,255,255,0.92)";
+            ctx.beginPath();
+            ctx.ellipse(p.sx, trunkY + trunkH * 0.92, trunkW * 0.95, trunkW * 0.42, 0, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // Tree body as stacked discs with shading
+          const layers = tree.layers;
+          const points = [];
+          for (let i = 0; i < layers; i++) {
+            const y = (i / (layers - 1)) * tree.height;
+            const r = treeRadiusAtY(y);
+
+            // Add slight twist to make it feel 3D
+            const twist = y * 1.35 + 0.12 * Math.sin(t * 0.6);
+            const p = rotateX(rotateY({ x: 0, y, z: 0 }, scene.rotY + twist * 0.04), scene.rotX);
+
+            const pr = project(p, w, h);
+            const sr = r * (camera.fov / (p.z + camera.z)) * w * 0.28;
+            points.push({ y, r, p, pr, sr });
+          }
+
+          // draw from back to front by depth
+          points.sort((a, b) => b.pr.z - a.pr.z);
+
+          // painterly foliage: layered brush wedges + snowy strokes
+          function drawBrushWedge(cx, cy, rx, ry, ang, sweep, colA, colB, alpha) {
+            ctx.save();
+            ctx.translate(cx, cy);
+            ctx.rotate(ang);
+            const g = ctx.createRadialGradient(-rx * 0.25, -ry * 0.25, Math.max(1, rx * 0.06), 0, 0, Math.max(rx, ry));
+            g.addColorStop(0, colA);
+            g.addColorStop(1, colB);
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.moveTo(0, 0);
+            ctx.ellipse(0, 0, rx, ry, 0, -sweep * 0.5, sweep * 0.5);
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+
+          function drawNeedleStrokes(cx, cy, rr, tY, density, snowiness) {
+            const dpr = DPR();
+            const n = Math.max(6, Math.floor(density));
+            const baseLen = rr * (0.11 + 0.06 * (1 - tY));
+
+            // dark needle scratches
+            ctx.save();
+            ctx.globalAlpha = 0.16 + 0.10 * (1 - tY);
+            ctx.lineCap = "round";
+            ctx.lineWidth = Math.max(0.9, 1.6 * dpr * (0.55 + (1 - tY) * 0.45));
+            ctx.strokeStyle = "rgba(10, 8, 10, 0.70)";
+            for (let i = 0; i < n; i++) {
+              const u = (i / n) * TAU + (hash2(i, Math.floor(tY * 999) + 11) - 0.5) * 0.35;
+              const ex = Math.cos(u);
+              const ey = Math.sin(u) * 0.32;
+              const len = baseLen * (0.6 + 0.9 * hash2(i + 19, 5));
+              const x0 = cx + ex * rr * (0.55 + 0.40 * hash2(i + 3, 7));
+              const y0 = cy + ey * rr * (0.55 + 0.40 * hash2(i + 9, 2));
+              ctx.beginPath();
+              ctx.moveTo(x0, y0);
+              ctx.lineTo(x0 + ex * len, y0 + ey * len);
+              ctx.stroke();
+            }
+            ctx.restore();
+
+            // snowy strokes
+            if (snowiness > 0.01) {
+              ctx.save();
+              ctx.globalAlpha = 0.18 + 0.26 * snowiness;
+              ctx.lineCap = "round";
+              ctx.lineWidth = Math.max(1.0, 2.2 * dpr * (0.55 + (1 - tY) * 0.55));
+              ctx.strokeStyle = "rgba(255, 255, 255, 0.92)";
+              const m = Math.floor(n * (0.55 + 0.75 * snowiness));
+              for (let i = 0; i < m; i++) {
+                const u = (i / Math.max(1, m)) * TAU + (hash2(i, Math.floor(tY * 777) + 3) - 0.5) * 0.55;
+                const ex = Math.cos(u);
+                const ey = Math.sin(u) * 0.28;
+                const len = baseLen * (0.55 + 1.1 * hash2(i + 41, 13)) * (0.75 + 0.65 * snowiness);
+                const x0 = cx + ex * rr * (0.35 + 0.55 * hash2(i + 6, 9));
+                const y0 = cy + ey * rr * (0.35 + 0.55 * hash2(i + 12, 4));
+                ctx.beginPath();
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x0 + ex * len, y0 + ey * len);
+                ctx.stroke();
+              }
+
+              // powder clumps
+              ctx.globalAlpha = 0.12 + 0.18 * snowiness;
+              for (let i = 0; i < Math.floor(3 + 7 * snowiness); i++) {
+                const a = hash2(i + 1, Math.floor(tY * 999) + 91) * TAU;
+                const rx = rr * (0.10 + 0.08 * hash2(i + 7, 17));
+                const ry = rx * (0.35 + 0.25 * hash2(i + 9, 19));
+                const x = cx + Math.cos(a) * rr * 0.35;
+                const y = cy + Math.sin(a) * rr * 0.10;
+                ctx.fillStyle = "rgba(255,255,255,0.95)";
+                ctx.beginPath();
+                ctx.ellipse(x, y, rx, ry, a, 0, TAU);
+                ctx.fill();
+              }
+              ctx.restore();
+            }
+          }
+
+          // Layered foliage
+          for (const layer of points) {
+            const { pr, sr, y } = layer;
+            const tY = y / tree.height;
+            const rr = Math.max(1, sr);
+
+            const level = 1 - tY;
+            const snowiness = smoothstep(0.32, 0.96, level) * (0.55 + 0.25 * Math.sin(t * 0.05));
+            const tex = fbm2(tY * 2.8 + 3.1, 2.2) * 0.75; // reduce rotation-driven asymmetry
+            const deep = 0.70 + 0.30 * smoothstep(2.6, 4.4, pr.z);
+
+            // base dark green wedge
+            const ang = 0; // keep foliage more symmetric
+            const sweep = 2.15 + 0.45 * (1 - tY);
+            const g0 = Math.floor(60 + 70 * level);
+            const g1 = Math.floor(105 + 55 * level);
+            const b0 = Math.floor(35 + 25 * level);
+            const colA = `rgba(18, ${g1}, ${b0}, 0.98)`;
+            const colB = `rgba(8, ${g0}, 20, 0.96)`;
+            drawBrushWedge(pr.sx, pr.sy, rr * (1.0 + 0.05 * tex), rr * 0.33, ang, sweep, colA, colB, 0.92 * deep);
+
+            // highlight wedge (gives layered brush feel)
+            const hi = 0.10 + 0.22 * level;
+            const colH = `rgba(${Math.floor(60 + 25 * level)}, ${Math.floor(160 + 40 * level)}, ${Math.floor(
+              90 + 30 * level,
+            )}, 0.90)`;
+            const colH2 = `rgba(0, 0, 0, 0)`;
+            drawBrushWedge(pr.sx - rr * 0.10, pr.sy - rr * 0.05, rr * 0.95, rr * 0.30, ang - 0.04, sweep * 0.92, colH, colH2, hi * deep);
+
+            // needle & snow strokes
+            drawNeedleStrokes(pr.sx, pr.sy, rr, tY, 10 + 48 * level * deep, snowiness * deep);
+          }
+
+          for (const layer of points) {
+            const { pr, sr, y } = layer;
+            const tY = y / tree.height;
+
+            const shade = 0.25 + 0.75 * (1 - tY);
+            const rim = 0.2 + 0.8 * smoothstep(0.0, 1.0, Math.abs(Math.sin(scene.rotY + tY * 2.2)));
+            const baseGreen = { r: 14, g: 112, b: 54 };
+
+            const rr = Math.max(1, sr);
+            const tex = fbm2(tY * 2.6 + 1.7, (scene.rotY + 10) * 0.35) * 0.8 + fbm2(tY * 6.2 + 9.1, 3.2) * 0.25;
+            const texShade = 0.82 + tex * 0.32;
+
+            const grad = ctx.createRadialGradient(pr.sx - rr * 0.2, pr.sy - rr * 0.1, rr * 0.08, pr.sx, pr.sy, rr * 1.12);
+            grad.addColorStop(
+              0,
+              `rgba(${Math.floor(baseGreen.r * 0.8 + 10)}, ${Math.floor(baseGreen.g * 1.08 + 14)}, ${Math.floor(
+                baseGreen.b * 0.92 + 10,
+              )}, 0.99)`,
+            );
+            grad.addColorStop(
+              0.55,
+              `rgba(${Math.floor(baseGreen.r * (0.58 + 0.42 * shade) * texShade)}, ${Math.floor(
+                baseGreen.g * (0.62 + 0.60 * shade) * texShade,
+              )}, ${Math.floor(baseGreen.b * (0.58 + 0.42 * shade) * texShade)}, 0.99)`,
+            );
+            grad.addColorStop(1, `rgba(${Math.floor(8 * rim)}, ${Math.floor(48 * rim)}, ${Math.floor(22 * rim)}, 0.98)`);
+
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.ellipse(pr.sx, pr.sy, rr, rr * 0.28, 0, 0, TAU);
+            ctx.fill();
+
+            // needle strokes to add "tree" texture (front layers only)
+            const front = smoothstep(2.4, 4.2, pr.z);
+            const strokeCount = Math.floor(18 + 62 * (1 - tY) * front);
+            if (strokeCount > 0) {
+              ctx.save();
+              ctx.globalAlpha = 0.12 + 0.12 * (1 - tY);
+              ctx.lineWidth = Math.max(0.8, 1.4 * dpr * (0.55 + pr.s));
+              ctx.strokeStyle = "rgba(0,0,0,0.55)";
+              for (let i = 0; i < strokeCount; i++) {
+                const u = (i / strokeCount) * TAU + tY * 0.8 + Math.sin(t * 0.15) * 0.05;
+                const jitter = (hash2(i, Math.floor(tY * 999)) - 0.5) * 0.25;
+                const ang = u + jitter;
+                const len = rr * (0.06 + 0.05 * (1 - tY)) * (0.7 + 0.6 * hash2(i + 17, 3));
+                const ex = Math.cos(ang);
+                const ey = Math.sin(ang) * 0.28;
+                const x0 = pr.sx + ex * rr * 0.92;
+                const y0 = pr.sy + ey * rr * 0.92;
+                const x1 = pr.sx + ex * (rr * 0.92 + len);
+                const y1 = pr.sy + ey * (rr * 0.92 + len);
+                ctx.beginPath();
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x1, y1);
+                ctx.stroke();
+              }
+              // highlight needles
+              ctx.globalAlpha = 0.10 + 0.10 * (1 - tY);
+              ctx.strokeStyle = "rgba(255,255,255,0.28)";
+              for (let i = 0; i < Math.floor(strokeCount * 0.55); i++) {
+                const u = (i / Math.max(1, Math.floor(strokeCount * 0.55))) * TAU + tY * 1.4;
+                const jitter = (hash2(i, Math.floor(tY * 777) + 5) - 0.5) * 0.3;
+                const ang = u + jitter;
+                const len = rr * (0.04 + 0.04 * (1 - tY)) * (0.6 + 0.7 * hash2(i + 33, 11));
+                const ex = Math.cos(ang);
+                const ey = Math.sin(ang) * 0.28;
+                const x0 = pr.sx + ex * rr * 0.88;
+                const y0 = pr.sy + ey * rr * 0.88;
+                ctx.beginPath();
+                ctx.moveTo(x0, y0);
+                ctx.lineTo(x0 + ex * len, y0 + ey * len);
+                ctx.stroke();
+              }
+              ctx.restore();
+            }
+          }
+
+          // garland ribbons (spirals)
+          ctx.save();
+          ctx.globalAlpha = 0.8;
+          for (let k = 0; k < 4; k++) {
+            // golden tinsel
+            const warm = 0.65 + 0.35 * Math.sin(t * (0.4 + k * 0.12) + k);
+            ctx.strokeStyle = `rgba(255, ${Math.floor(210 + 25 * warm)}, ${Math.floor(80 + 30 * warm)}, 0.32)`;
+            ctx.lineWidth = (2.0 + 0.6 * warm) * dpr;
+            ctx.beginPath();
+            const steps = 120;
+            for (let i = 0; i <= steps; i++) {
+              const t0 = i / steps;
+              const y = t0 * tree.height;
+              const r0 = treeRadiusAtY(y) * 0.95;
+              const a = t0 * TAU * (1.55 + k * 0.12) + t * (0.18 + k * 0.05);
+              const p3 = rotateX(rotateY({ x: Math.cos(a) * r0, y, z: Math.sin(a) * r0 }, scene.rotY), scene.rotX);
+              const pr = project(p3, w, h);
+              if (i === 0) ctx.moveTo(pr.sx, pr.sy);
+              else ctx.lineTo(pr.sx, pr.sy);
+            }
+            ctx.stroke();
+
+            // glitter glow
+            ctx.globalCompositeOperation = "lighter";
+            ctx.globalAlpha = 0.22;
+            ctx.strokeStyle = `rgba(255, ${Math.floor(240)}, ${Math.floor(150)}, 0.22)`;
+            ctx.lineWidth = (5.0 + 2.0 * warm) * dpr;
+            ctx.stroke();
+            ctx.globalCompositeOperation = "source-over";
+            ctx.globalAlpha = 0.8;
+          }
+          ctx.restore();
+
+          // lights: sort by depth for nicer overlaps
+          const bulbs = lights.bulbs
+            .map((b, i) => {
+              const p = rotateX(rotateY(b, scene.rotY), scene.rotX);
+              const pr = project(p, w, h);
+              return { ...b, pr };
+            })
+            .sort((a, b) => b.pr.z - a.pr.z);
+
+          for (const b of bulbs) {
+            const tw = 0.45 + 0.55 * Math.sin(t * (1.6 + b.tw) + b.phase);
+            const pop = 0.55 + 0.45 * smoothstep(0, 1, tw);
+            const [r, g, bl] = hsvToRgb(b.hue + 0.12 * Math.sin(t * 0.2), 0.65, 1.0);
+
+            const size = b.size * (1.5 + 1.9 * pop) * (0.45 + 1.35 * b.pr.s) * glowScale;
+            const core = Math.max(0.9, size * 0.48);
+
+            // outer glow
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            const g1 = ctx.createRadialGradient(b.pr.sx, b.pr.sy, 0, b.pr.sx, b.pr.sy, size * 5.2);
+            g1.addColorStop(0.0, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, ${
+              0.22 * pop
+            })`);
+            g1.addColorStop(0.3, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, ${
+              0.10 * pop
+            })`);
+            g1.addColorStop(1.0, "rgba(0,0,0,0)");
+            ctx.fillStyle = g1;
+            ctx.beginPath();
+            ctx.arc(b.pr.sx, b.pr.sy, size * 5.2, 0, TAU);
+            ctx.fill();
+
+            // core
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, ${
+              0.95
+            })`;
+            ctx.beginPath();
+            ctx.arc(b.pr.sx, b.pr.sy, core, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // star
+          {
+            const p = rotateX(rotateY(star, scene.rotY), scene.rotX);
+            const pr = project(p, w, h);
+            const pulse = 0.65 + 0.35 * Math.sin(t * 1.8);
+            const s0 = (16 + 18 * pulse) * dpr * (0.65 + 1.6 * pr.s);
+
+            ctx.save();
+            ctx.translate(pr.sx, pr.sy);
+            ctx.rotate(t * 0.25);
+            ctx.globalCompositeOperation = "lighter";
+            const g = ctx.createRadialGradient(0, 0, 0, 0, 0, s0 * 3.0);
+            g.addColorStop(0, `rgba(255, 240, 180, ${0.25 + 0.2 * pulse})`);
+            g.addColorStop(0.4, `rgba(255, 210, 120, ${0.12 + 0.1 * pulse})`);
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(0, 0, s0 * 3.0, 0, TAU);
+            ctx.fill();
+
+            // 5-point star
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = `rgba(255, 240, 190, ${0.92})`;
+            ctx.beginPath();
+            for (let i = 0; i < 10; i++) {
+              const a = (i / 10) * TAU - Math.PI / 2;
+              const rr = i % 2 === 0 ? s0 : s0 * 0.45;
+              ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        function drawSnow(w, h, t) {
+          const dpr = DPR();
+          ctx.save();
+          ctx.globalCompositeOperation = "source-over";
+          for (const f of snow.flakes) {
+            f.y += f.vy * (0.007 + 0.010 * (1 - f.z));
+            f.x += f.vx * (0.35 + 0.8 * (1 - f.z)) + Math.sin(t * 0.6 + f.w) * 0.0006;
+            if (f.y > 1.05) {
+              f.y = -0.05;
+              f.x = Math.random();
+              f.z = Math.random();
+            }
+            if (f.x < -0.1) f.x = 1.1;
+            if (f.x > 1.1) f.x = -0.1;
+
+            const px = f.x * w;
+            const py = f.y * h;
+            const size = f.r * dpr * (0.55 + 1.6 * (1 - f.z));
+            const alpha = 0.10 + 0.35 * (1 - f.z);
+
+            // blur glow
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            const g = ctx.createRadialGradient(px, py, 0, px, py, size * 4.5);
+            g.addColorStop(0, "rgba(255,255,255,0.65)");
+            g.addColorStop(0.35, "rgba(255,255,255,0.25)");
+            g.addColorStop(1, "rgba(255,255,255,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(px, py, size * 4.5, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+
+            // core
+            ctx.globalAlpha = 0.22 + 0.35 * (1 - f.z);
+            ctx.fillStyle = "#ffffff";
+            ctx.beginPath();
+            ctx.arc(px, py, Math.max(0.6, size), 0, TAU);
+            ctx.fill();
+          }
+          ctx.restore();
+        }
+
+        // -------------- Main loop --------------
+        let last = performance.now();
+        function frame(nowMs) {
+          const now = nowMs * 0.001;
+          const dt = Math.min(0.05, (nowMs - last) / 1000);
+          last = nowMs;
+
+          resize();
+          const w = canvas.width;
+          const h = canvas.height;
+
+          drawBackground(w, h, now);
+          drawGround(w, h, now);
+          drawTree(w, h, now);
+          drawSnow(w, h, now);
+
+          if (audio.ctx) scheduleAudio(audio.ctx.currentTime);
+
+          requestAnimationFrame(frame);
+        }
+        requestAnimationFrame(frame);
+
+        // -------------- Small UX: detect low power & reduce snow --------------
+        if (window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          snow.count = 120;
+          initSnow();
+          statusEl.textContent = "Reduced motion · Tap Play Music";
+        }
+      })();
+    </script>
+  </body>
+</html>
