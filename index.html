@@ -117,6 +117,11 @@
         const statusEl = document.getElementById("status");
 
         const DPR = () => Math.min(2, window.devicePixelRatio || 1);
+
+        const UA = (navigator.userAgent || "").toLowerCase();
+        const isWeChat = UA.includes("micromessenger");
+        const isMobile = /iphone|ipad|ipod|android/.test(UA) || (navigator.maxTouchPoints || 0) > 0;
+        const perfMode = isMobile || isWeChat ? "mobile" : "desktop";
         function resize() {
           const dpr = DPR();
           const w = Math.max(1, Math.floor(window.innerWidth * dpr));
@@ -266,13 +271,15 @@
         const particleTree = {
           enabled: true,
           points: [],
-          count: 3600,
-          lightCount: 260,
+          count: perfMode === "mobile" ? 1500 : 3600,
+          lightCount: perfMode === "mobile" ? 140 : 260,
           lights: [],
           sparkleCount: 120,
-          ribbonCount: 520,
+          ribbonCount: perfMode === "mobile" ? 220 : 520,
           ribbon: [],
+          bowCount: perfMode === "mobile" ? 220 : 520,
           bow: [],
+          trunkCount: perfMode === "mobile" ? 260 : 520,
           trunkPoints: [],
         };
 
@@ -370,7 +377,7 @@
             const baseR = treeRadiusAtY(y) * 0.92;
             const center = { x: 0, y, z: baseR * 0.25 };
             const bowPts = [];
-            const N = 320;
+            const N = Math.floor(particleTree.bowCount * 0.62);
             for (let i = 0; i < N; i++) {
               const t = Math.random();
               const side = i % 2 === 0 ? -1 : 1;
@@ -389,7 +396,7 @@
               });
             }
             // knot
-            for (let i = 0; i < 80; i++) {
+            for (let i = 0; i < Math.floor(particleTree.bowCount * 0.16); i++) {
               bowPts.push({
                 x: center.x + (Math.random() - 0.5) * 0.10,
                 y: center.y + (Math.random() - 0.5) * 0.08,
@@ -400,7 +407,7 @@
               });
             }
             // tails
-            for (let i = 0; i < 120; i++) {
+            for (let i = 0; i < Math.floor(particleTree.bowCount * 0.22); i++) {
               const side = i % 2 === 0 ? -1 : 1;
               const tt = Math.random();
               bowPts.push({
@@ -417,7 +424,7 @@
 
           // trunk points: glowing brownish particle cylinder
           {
-            const N = 520;
+            const N = particleTree.trunkCount;
             const h = trunk.height;
             for (let i = 0; i < N; i++) {
               const u = Math.random();
@@ -1452,22 +1459,30 @@
 
         // -------------- Main loop --------------
         let last = performance.now();
+        let acc = 0;
+        const targetFps = perfMode === "mobile" ? 30 : 60;
+        const frameStep = 1 / targetFps;
         function frame(nowMs) {
           const now = nowMs * 0.001;
           const dt = Math.min(0.05, (nowMs - last) / 1000);
           last = nowMs;
+          acc += dt;
 
-          resize();
-          const w = canvas.width;
-          const h = canvas.height;
+          // cap update rate on mobile for steadier feel
+          if (perfMode !== "mobile" || acc >= frameStep) {
+            acc = perfMode === "mobile" ? acc % frameStep : 0;
 
-          drawBackground(w, h, now);
-          drawGround(w, h, now);
-          drawTree(w, h, now);
-          drawSnow(w, h, now);
+            resize();
+            const w = canvas.width;
+            const h = canvas.height;
+
+            drawBackground(w, h, now);
+            drawGround(w, h, now);
+            drawTree(w, h, now);
+            drawSnow(w, h, now);
+          }
 
           if (audio.ctx) scheduleAudio(audio.ctx.currentTime);
-
           requestAnimationFrame(frame);
         }
         requestAnimationFrame(frame);
