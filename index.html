@@ -262,6 +262,184 @@
           count: 240,
         };
 
+        // -------------- Particle Tree (point cloud) --------------
+        const particleTree = {
+          enabled: true,
+          points: [],
+          count: 3600,
+          lightCount: 260,
+          lights: [],
+          sparkleCount: 120,
+          ribbonCount: 520,
+          ribbon: [],
+          bow: [],
+          trunkPoints: [],
+        };
+
+        function randn() {
+          // Box–Muller
+          let u = 0;
+          let v = 0;
+          while (u === 0) u = Math.random();
+          while (v === 0) v = Math.random();
+          return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(TAU * v);
+        }
+
+        function buildParticleTree() {
+          particleTree.points.length = 0;
+          particleTree.lights.length = 0;
+          particleTree.ribbon.length = 0;
+          particleTree.bow.length = 0;
+          particleTree.trunkPoints.length = 0;
+
+          // foliage points on a cone-ish surface + some volume
+          for (let i = 0; i < particleTree.count; i++) {
+            const u = Math.random();
+            const y = u * tree.height;
+            const baseR = treeRadiusAtY(y);
+            const a = Math.random() * TAU;
+            const shell = Math.pow(Math.random(), 0.55); // bias to surface
+            const r = baseR * (0.62 + 0.50 * shell);
+            const x = Math.cos(a) * r;
+            const z = Math.sin(a) * r;
+
+            // subtle symmetry: reduce random lopsidedness with small centered jitter
+            const jx = randn() * baseR * 0.03;
+            const jz = randn() * baseR * 0.03;
+
+            const level = 1 - u;
+            const hue = 0.34 + 0.03 * (hash2(i, 2) - 0.5);
+            const sat = 0.55 + 0.25 * level;
+            const val = 0.35 + 0.55 * level;
+
+            particleTree.points.push({
+              x: x + jx,
+              y,
+              z: z + jz,
+              a,
+              u,
+              hue,
+              sat,
+              val,
+              size: 0.65 + Math.random() * 1.6,
+              phase: Math.random() * TAU,
+            });
+          }
+
+          // lights (colored bulbs) on the surface
+          for (let i = 0; i < particleTree.lightCount; i++) {
+            const u = Math.random();
+            const y = u * tree.height;
+            const r = treeRadiusAtY(y) * (0.92 + Math.random() * 0.10);
+            const a = Math.random() * TAU;
+            particleTree.lights.push({
+              x: Math.cos(a) * r,
+              y,
+              z: Math.sin(a) * r,
+              hue: Math.random(),
+              phase: Math.random() * TAU,
+              tw: 0.8 + Math.random() * 1.2,
+              size: 1.2 + Math.random() * 2.6,
+            });
+          }
+
+          // ribbon: a glowing spiral band wrapping the tree
+          for (let i = 0; i < particleTree.ribbonCount; i++) {
+            const u = Math.random();
+            const y = (0.12 + 0.82 * u) * tree.height;
+            const baseR = treeRadiusAtY(y);
+            const turns = 3.3;
+            const a0 = u * TAU * turns;
+            const band = (Math.random() - 0.5) * 0.06;
+            const r = baseR * (0.92 + band);
+            const a = a0 + (Math.random() - 0.5) * 0.14;
+            particleTree.ribbon.push({
+              x: Math.cos(a) * r,
+              y,
+              z: Math.sin(a) * r,
+              a,
+              u,
+              phase: Math.random() * TAU,
+              size: 1.0 + Math.random() * 2.2,
+            });
+          }
+
+          // bow: particle bow placed on upper-mid front
+          {
+            const y = tree.height * 0.62;
+            const baseR = treeRadiusAtY(y) * 0.92;
+            const center = { x: 0, y, z: baseR * 0.25 };
+            const bowPts = [];
+            const N = 320;
+            for (let i = 0; i < N; i++) {
+              const t = Math.random();
+              const side = i % 2 === 0 ? -1 : 1;
+              const ax = (Math.random() * 2 - 1) * 0.22;
+              const ay = (Math.random() * 2 - 1) * 0.18;
+              const px = side * (0.20 + 0.10 * Math.cos(t * TAU)) + ax;
+              const py = ay;
+              const pz = 0.02 + 0.06 * Math.sin(t * TAU) + (Math.random() - 0.5) * 0.03;
+              bowPts.push({
+                x: center.x + px,
+                y: center.y + py,
+                z: center.z + pz,
+                phase: Math.random() * TAU,
+                size: 1.2 + Math.random() * 2.3,
+                kind: "loop",
+              });
+            }
+            // knot
+            for (let i = 0; i < 80; i++) {
+              bowPts.push({
+                x: center.x + (Math.random() - 0.5) * 0.10,
+                y: center.y + (Math.random() - 0.5) * 0.08,
+                z: center.z + 0.06 + (Math.random() - 0.5) * 0.04,
+                phase: Math.random() * TAU,
+                size: 1.0 + Math.random() * 1.8,
+                kind: "knot",
+              });
+            }
+            // tails
+            for (let i = 0; i < 120; i++) {
+              const side = i % 2 === 0 ? -1 : 1;
+              const tt = Math.random();
+              bowPts.push({
+                x: center.x + side * 0.08 + (Math.random() - 0.5) * 0.10,
+                y: center.y - 0.10 - tt * 0.22 + (Math.random() - 0.5) * 0.04,
+                z: center.z + 0.03 + (Math.random() - 0.5) * 0.04,
+                phase: Math.random() * TAU,
+                size: 0.9 + Math.random() * 1.6,
+                kind: "tail",
+              });
+            }
+            particleTree.bow.push(...bowPts);
+          }
+
+          // trunk points: glowing brownish particle cylinder
+          {
+            const N = 520;
+            const h = trunk.height;
+            for (let i = 0; i < N; i++) {
+              const u = Math.random();
+              const y = 0.10 + u * h;
+              const r = trunk.radius * (0.75 + 0.45 * Math.random());
+              const a = Math.random() * TAU;
+              const x = Math.cos(a) * r;
+              const z = Math.sin(a) * r;
+              particleTree.trunkPoints.push({
+                x,
+                y,
+                z,
+                u,
+                phase: Math.random() * TAU,
+                size: 0.9 + Math.random() * 1.8,
+              });
+            }
+          }
+        }
+
+        buildParticleTree();
+
         function initSnow() {
           snow.flakes.length = 0;
           for (let i = 0; i < snow.count; i++) {
@@ -278,12 +456,6 @@
         }
         initSnow();
 
-        // -------------- Lights (ornaments) --------------
-        const lights = {
-          bulbs: [],
-          count: 150,
-        };
-
         function treeRadiusAtY(y) {
           // y in [0, height]
           const t = y / tree.height;
@@ -292,28 +464,6 @@
           const scallop = 0.04 * Math.sin(t * 8.0 * TAU) + 0.02 * Math.sin(t * 3.0 * TAU);
           return tree.baseRadius * (profile + scallop);
         }
-
-        function initLights() {
-          lights.bulbs.length = 0;
-          for (let i = 0; i < lights.count; i++) {
-            const y = Math.random() * tree.height;
-            const r = treeRadiusAtY(y) * (0.82 + Math.random() * 0.24);
-            const a = Math.random() * TAU;
-            const x = Math.cos(a) * r;
-            const z = Math.sin(a) * r;
-            const hue = Math.random();
-            lights.bulbs.push({
-              x,
-              y,
-              z,
-              hue,
-              phase: Math.random() * TAU,
-              tw: 0.6 + Math.random() * 0.8,
-              size: 1.4 + Math.random() * 1.8,
-            });
-          }
-        }
-        initLights();
 
         // -------------- Star --------------
         const star = {
@@ -675,6 +825,11 @@
           const dpr = DPR();
           const glowScale = Math.min(w, h) / (900 * dpr);
 
+          if (particleTree.enabled) {
+            drawParticleTree(w, h, t, glowScale);
+            return;
+          }
+
           // ground shadow under the tree
           {
             const base = rotateX(rotateY({ x: 0, y: 0.05, z: 0 }, scene.rotY), scene.rotX);
@@ -889,83 +1044,6 @@
             drawNeedleStrokes(pr.sx, pr.sy, rr, tY, 10 + 48 * level * deep, snowiness * deep);
           }
 
-          for (const layer of points) {
-            const { pr, sr, y } = layer;
-            const tY = y / tree.height;
-
-            const shade = 0.25 + 0.75 * (1 - tY);
-            const rim = 0.2 + 0.8 * smoothstep(0.0, 1.0, Math.abs(Math.sin(scene.rotY + tY * 2.2)));
-            const baseGreen = { r: 14, g: 112, b: 54 };
-
-            const rr = Math.max(1, sr);
-            const tex = fbm2(tY * 2.6 + 1.7, (scene.rotY + 10) * 0.35) * 0.8 + fbm2(tY * 6.2 + 9.1, 3.2) * 0.25;
-            const texShade = 0.82 + tex * 0.32;
-
-            const grad = ctx.createRadialGradient(pr.sx - rr * 0.2, pr.sy - rr * 0.1, rr * 0.08, pr.sx, pr.sy, rr * 1.12);
-            grad.addColorStop(
-              0,
-              `rgba(${Math.floor(baseGreen.r * 0.8 + 10)}, ${Math.floor(baseGreen.g * 1.08 + 14)}, ${Math.floor(
-                baseGreen.b * 0.92 + 10,
-              )}, 0.99)`,
-            );
-            grad.addColorStop(
-              0.55,
-              `rgba(${Math.floor(baseGreen.r * (0.58 + 0.42 * shade) * texShade)}, ${Math.floor(
-                baseGreen.g * (0.62 + 0.60 * shade) * texShade,
-              )}, ${Math.floor(baseGreen.b * (0.58 + 0.42 * shade) * texShade)}, 0.99)`,
-            );
-            grad.addColorStop(1, `rgba(${Math.floor(8 * rim)}, ${Math.floor(48 * rim)}, ${Math.floor(22 * rim)}, 0.98)`);
-
-            ctx.fillStyle = grad;
-            ctx.beginPath();
-            ctx.ellipse(pr.sx, pr.sy, rr, rr * 0.28, 0, 0, TAU);
-            ctx.fill();
-
-            // needle strokes to add "tree" texture (front layers only)
-            const front = smoothstep(2.4, 4.2, pr.z);
-            const strokeCount = Math.floor(18 + 62 * (1 - tY) * front);
-            if (strokeCount > 0) {
-              ctx.save();
-              ctx.globalAlpha = 0.12 + 0.12 * (1 - tY);
-              ctx.lineWidth = Math.max(0.8, 1.4 * dpr * (0.55 + pr.s));
-              ctx.strokeStyle = "rgba(0,0,0,0.55)";
-              for (let i = 0; i < strokeCount; i++) {
-                const u = (i / strokeCount) * TAU + tY * 0.8 + Math.sin(t * 0.15) * 0.05;
-                const jitter = (hash2(i, Math.floor(tY * 999)) - 0.5) * 0.25;
-                const ang = u + jitter;
-                const len = rr * (0.06 + 0.05 * (1 - tY)) * (0.7 + 0.6 * hash2(i + 17, 3));
-                const ex = Math.cos(ang);
-                const ey = Math.sin(ang) * 0.28;
-                const x0 = pr.sx + ex * rr * 0.92;
-                const y0 = pr.sy + ey * rr * 0.92;
-                const x1 = pr.sx + ex * (rr * 0.92 + len);
-                const y1 = pr.sy + ey * (rr * 0.92 + len);
-                ctx.beginPath();
-                ctx.moveTo(x0, y0);
-                ctx.lineTo(x1, y1);
-                ctx.stroke();
-              }
-              // highlight needles
-              ctx.globalAlpha = 0.10 + 0.10 * (1 - tY);
-              ctx.strokeStyle = "rgba(255,255,255,0.28)";
-              for (let i = 0; i < Math.floor(strokeCount * 0.55); i++) {
-                const u = (i / Math.max(1, Math.floor(strokeCount * 0.55))) * TAU + tY * 1.4;
-                const jitter = (hash2(i, Math.floor(tY * 777) + 5) - 0.5) * 0.3;
-                const ang = u + jitter;
-                const len = rr * (0.04 + 0.04 * (1 - tY)) * (0.6 + 0.7 * hash2(i + 33, 11));
-                const ex = Math.cos(ang);
-                const ey = Math.sin(ang) * 0.28;
-                const x0 = pr.sx + ex * rr * 0.88;
-                const y0 = pr.sy + ey * rr * 0.88;
-                ctx.beginPath();
-                ctx.moveTo(x0, y0);
-                ctx.lineTo(x0 + ex * len, y0 + ey * len);
-                ctx.stroke();
-              }
-              ctx.restore();
-            }
-          }
-
           // garland ribbons (spirals)
           ctx.save();
           ctx.globalAlpha = 0.8;
@@ -1066,6 +1144,257 @@
             // 5-point star
             ctx.globalCompositeOperation = "source-over";
             ctx.fillStyle = `rgba(255, 240, 190, ${0.92})`;
+            ctx.beginPath();
+            for (let i = 0; i < 10; i++) {
+              const a = (i / 10) * TAU - Math.PI / 2;
+              const rr = i % 2 === 0 ? s0 : s0 * 0.45;
+              ctx.lineTo(Math.cos(a) * rr, Math.sin(a) * rr);
+            }
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+          }
+        }
+
+        function drawParticleTree(w, h, t, glowScale) {
+          // ground shadow
+          {
+            const base = rotateX(rotateY({ x: 0, y: 0.05, z: 0 }, scene.rotY), scene.rotX);
+            const pr = project(base, w, h);
+            ctx.save();
+            ctx.globalAlpha = 0.34;
+            const rr = Math.min(w, h) * 0.12 * (0.85 + pr.s);
+            const g = ctx.createRadialGradient(pr.sx, pr.sy + rr * 1.65, rr * 0.2, pr.sx, pr.sy + rr * 1.65, rr * 1.9);
+            g.addColorStop(0, "rgba(0,0,0,0.40)");
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.ellipse(pr.sx, pr.sy + rr * 1.65, rr * 1.35, rr * 0.55, 0, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // trunk as particles (match point-cloud style)
+          {
+            const dpr = DPR();
+            const trunkPts = particleTree.trunkPoints
+              .map((tp) => {
+                const p = rotateX(rotateY({ x: tp.x, y: tp.y, z: tp.z }, scene.rotY), scene.rotX);
+                const pr = project(p, w, h);
+                return { pr, tp };
+              })
+              .sort((a, b) => b.pr.z - a.pr.z);
+
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            for (const it of trunkPts) {
+              const { pr, tp } = it;
+              const tw = 0.55 + 0.45 * Math.sin(t * 0.8 + tp.phase);
+              const size = tp.size * (0.55 + 1.6 * pr.s) * glowScale;
+              const core = Math.max(0.7, size * 0.72);
+              const alpha = (0.10 + 0.12 * (1 - tp.u)) * (0.65 + 0.35 * tw);
+
+              // warm bark-ish tint
+              const cr = 150;
+              const cg = 86;
+              const cb = 55;
+              const gr = core * 3.8;
+              const g0 = ctx.createRadialGradient(pr.sx, pr.sy, 0, pr.sx, pr.sy, gr);
+              g0.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${alpha})`);
+              g0.addColorStop(0.55, `rgba(${cr}, ${cg}, ${cb}, ${alpha * 0.16})`);
+              g0.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = g0;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, gr, 0, TAU);
+              ctx.fill();
+
+              ctx.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${0.55 + 0.30 * tw})`;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, core, 0, TAU);
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+
+          // Build projected points
+          const pts = [];
+          const baseLift = 0.02;
+          for (const p0 of particleTree.points) {
+            const p = rotateX(rotateY({ x: p0.x, y: p0.y + baseLift, z: p0.z }, scene.rotY), scene.rotX);
+            const pr = project(p, w, h);
+            pts.push({ pr, p0 });
+          }
+          const bulbs = particleTree.lights
+            .map((b) => {
+              const p = rotateX(rotateY({ x: b.x, y: b.y + baseLift, z: b.z }, scene.rotY), scene.rotX);
+              const pr = project(p, w, h);
+              return { ...b, pr };
+            })
+            .sort((a, b) => b.pr.z - a.pr.z);
+
+          // Depth sort
+          pts.sort((a, b) => b.pr.z - a.pr.z);
+
+          // Render foliage points
+          ctx.save();
+          ctx.globalCompositeOperation = "lighter";
+          for (const it of pts) {
+            const { pr, p0 } = it;
+            const level = 1 - p0.u;
+            const tw = 0.55 + 0.45 * Math.sin(t * 0.9 + p0.phase);
+            const [r, g, b] = hsvToRgb(p0.hue, p0.sat, p0.val);
+            const size = p0.size * (0.55 + 1.8 * pr.s) * glowScale;
+            const core = Math.max(0.7, size * 0.75);
+            const alpha = (0.07 + 0.18 * level) * (0.65 + 0.45 * tw);
+
+            // soft glow
+            const gr = core * (3.8 + 2.8 * level);
+            const g0 = ctx.createRadialGradient(pr.sx, pr.sy, 0, pr.sx, pr.sy, gr);
+            g0.addColorStop(0, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, ${alpha})`);
+            g0.addColorStop(0.55, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, ${alpha * 0.18})`);
+            g0.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g0;
+            ctx.beginPath();
+            ctx.arc(pr.sx, pr.sy, gr, 0, TAU);
+            ctx.fill();
+
+            // core dot
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(b * 255)}, ${0.55 + 0.35 * tw})`;
+            ctx.beginPath();
+            ctx.arc(pr.sx, pr.sy, core, 0, TAU);
+            ctx.fill();
+          }
+          ctx.restore();
+
+          // Render bulbs on top
+          for (const b of bulbs) {
+            const tw = 0.45 + 0.55 * Math.sin(t * (1.6 + b.tw) + b.phase);
+            const pop = 0.55 + 0.45 * smoothstep(0, 1, tw);
+            const [r, g, bl] = hsvToRgb(b.hue + 0.12 * Math.sin(t * 0.2), 0.65, 1.0);
+            const size = b.size * (1.6 + 2.2 * pop) * (0.45 + 1.35 * b.pr.s) * glowScale;
+            const core = Math.max(0.9, size * 0.50);
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            const g1 = ctx.createRadialGradient(b.pr.sx, b.pr.sy, 0, b.pr.sx, b.pr.sy, size * 5.6);
+            g1.addColorStop(0.0, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, ${0.24 * pop})`);
+            g1.addColorStop(0.3, `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, ${0.10 * pop})`);
+            g1.addColorStop(1.0, "rgba(0,0,0,0)");
+            ctx.fillStyle = g1;
+            ctx.beginPath();
+            ctx.arc(b.pr.sx, b.pr.sy, size * 5.6, 0, TAU);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = `rgba(${Math.floor(r * 255)}, ${Math.floor(g * 255)}, ${Math.floor(bl * 255)}, 0.96)`;
+            ctx.beginPath();
+            ctx.arc(b.pr.sx, b.pr.sy, core, 0, TAU);
+            ctx.fill();
+            ctx.restore();
+          }
+
+          // Ribbon (golden spiral)
+          {
+            const rib = particleTree.ribbon
+              .map((rp) => {
+                const p = rotateX(rotateY({ x: rp.x, y: rp.y + baseLift, z: rp.z }, scene.rotY), scene.rotX);
+                const pr = project(p, w, h);
+                return { pr, rp };
+              })
+              .sort((a, b) => b.pr.z - a.pr.z);
+
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            for (const it of rib) {
+              const { pr, rp } = it;
+              const tw = 0.55 + 0.45 * Math.sin(t * 1.0 + rp.phase);
+              const shimmer = 0.6 + 0.4 * Math.sin(t * 2.2 + rp.u * 8 + rp.phase);
+              const size = rp.size * (0.55 + 1.75 * pr.s) * glowScale;
+              const core = Math.max(0.7, size * 0.72);
+              const alpha = 0.10 + 0.16 * shimmer;
+              const cr = 255;
+              const cg = Math.floor(210 + 35 * shimmer);
+              const cb = Math.floor(70 + 35 * shimmer);
+
+              const gr = core * 5.2;
+              const g0 = ctx.createRadialGradient(pr.sx, pr.sy, 0, pr.sx, pr.sy, gr);
+              g0.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${alpha})`);
+              g0.addColorStop(0.35, `rgba(${cr}, ${cg}, ${cb}, ${alpha * 0.16})`);
+              g0.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = g0;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, gr, 0, TAU);
+              ctx.fill();
+
+              ctx.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${0.55 + 0.30 * tw})`;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, core, 0, TAU);
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+
+          // Bow (red particles)
+          {
+            const bow = particleTree.bow
+              .map((bp) => {
+                const p = rotateX(rotateY({ x: bp.x, y: bp.y + baseLift, z: bp.z }, scene.rotY), scene.rotX);
+                const pr = project(p, w, h);
+                return { pr, bp };
+              })
+              .sort((a, b) => b.pr.z - a.pr.z);
+
+            ctx.save();
+            ctx.globalCompositeOperation = "lighter";
+            for (const it of bow) {
+              const { pr, bp } = it;
+              const tw = 0.55 + 0.45 * Math.sin(t * 1.3 + bp.phase);
+              const size = bp.size * (0.55 + 1.75 * pr.s) * glowScale;
+              const core = Math.max(0.7, size * 0.75);
+              const alpha = 0.10 + 0.18 * tw;
+
+              const cr = bp.kind === "knot" ? 255 : 240;
+              const cg = bp.kind === "knot" ? 95 : 70;
+              const cb = bp.kind === "knot" ? 95 : 80;
+
+              const gr = core * 4.8;
+              const g0 = ctx.createRadialGradient(pr.sx, pr.sy, 0, pr.sx, pr.sy, gr);
+              g0.addColorStop(0, `rgba(${cr}, ${cg}, ${cb}, ${alpha})`);
+              g0.addColorStop(0.45, `rgba(${cr}, ${cg}, ${cb}, ${alpha * 0.14})`);
+              g0.addColorStop(1, "rgba(0,0,0,0)");
+              ctx.fillStyle = g0;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, gr, 0, TAU);
+              ctx.fill();
+
+              ctx.fillStyle = `rgba(${cr}, ${cg}, ${cb}, ${0.60 + 0.30 * tw})`;
+              ctx.beginPath();
+              ctx.arc(pr.sx, pr.sy, core, 0, TAU);
+              ctx.fill();
+            }
+            ctx.restore();
+          }
+
+          // star (reuse existing star rendering but slightly more glowy)
+          {
+            const p = rotateX(rotateY(star, scene.rotY), scene.rotX);
+            const pr = project(p, w, h);
+            const dpr = DPR();
+            const pulse = 0.65 + 0.35 * Math.sin(t * 1.8);
+            const s0 = (16 + 18 * pulse) * dpr * (0.65 + 1.6 * pr.s);
+            ctx.save();
+            ctx.translate(pr.sx, pr.sy);
+            ctx.rotate(t * 0.25);
+            ctx.globalCompositeOperation = "lighter";
+            const g = ctx.createRadialGradient(0, 0, 0, 0, 0, s0 * 3.3);
+            g.addColorStop(0, `rgba(255, 240, 180, ${0.30 + 0.22 * pulse})`);
+            g.addColorStop(0.4, `rgba(255, 210, 120, ${0.14 + 0.11 * pulse})`);
+            g.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(0, 0, s0 * 3.3, 0, TAU);
+            ctx.fill();
+            ctx.globalCompositeOperation = "source-over";
+            ctx.fillStyle = `rgba(255, 240, 190, 0.94)`;
             ctx.beginPath();
             for (let i = 0; i < 10; i++) {
               const a = (i / 10) * TAU - Math.PI / 2;
